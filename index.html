@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="mobile-web-app-capable" content="yes" />
-  <title>NEON RUSH</title>
+  <title>OPEN ROAD DRIVE</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
       width: 100%; height: 100%;
       overflow: hidden;
-      background: #050510;
+      background: #87ceeb;
       font-family: 'Segoe UI', 'Arial', sans-serif;
       touch-action: none;
       -webkit-user-select: none;
@@ -34,19 +34,16 @@
       align-items: center;
       justify-content: center;
       z-index: 100;
-      background: radial-gradient(ellipse at 50% 80%, #0a0a2e 0%, #050510 70%);
+      background: linear-gradient(to bottom, #6db6ff 0%, #dff2ff 55%, #f3f9ff 100%);
     }
     #startScreen .grid-bg {
       position: absolute;
       bottom: 0; left: 0;
       width: 100%; height: 60%;
-      background:
-        linear-gradient(transparent 0%, #050510 100%),
-        repeating-linear-gradient(90deg, rgba(0,255,255,0.07) 0px, transparent 1px, transparent 60px),
-        repeating-linear-gradient(0deg, rgba(0,255,255,0.07) 0px, transparent 1px, transparent 60px);
-      transform: perspective(500px) rotateX(60deg);
+      background: linear-gradient(to top, rgba(66, 125, 56, 0.8) 0%, rgba(66, 125, 56, 0.3) 70%, transparent 100%);
+      transform: perspective(500px) rotateX(65deg);
       transform-origin: bottom center;
-      animation: gridScroll 2s linear infinite;
+      animation: gridScroll 6s linear infinite;
     }
     @keyframes gridScroll {
       0% { background-position: 0 0, 0 0, 0 0; }
@@ -56,26 +53,22 @@
       font-size: clamp(48px, 12vw, 100px);
       font-weight: 900;
       letter-spacing: 8px;
-      color: #fff;
-      text-shadow:
-        0 0 10px #00ffff,
-        0 0 30px #00ffff,
-        0 0 60px #00ffff,
-        0 0 100px #0088ff;
+      color: #1b334f;
+      text-shadow: 0 3px 12px rgba(255,255,255,0.6);
       z-index: 1;
-      animation: titlePulse 2s ease-in-out infinite;
+      animation: titlePulse 3s ease-in-out infinite;
     }
     @keyframes titlePulse {
-      0%, 100% { text-shadow: 0 0 10px #00ffff, 0 0 30px #00ffff, 0 0 60px #00ffff, 0 0 100px #0088ff; }
-      50% { text-shadow: 0 0 15px #00ffff, 0 0 40px #00ffff, 0 0 80px #00ffff, 0 0 140px #0088ff; }
+      0%, 100% { text-shadow: 0 3px 12px rgba(255,255,255,0.6); }
+      50% { text-shadow: 0 5px 18px rgba(255,255,255,0.75); }
     }
     #startScreen .subtitle {
       font-size: clamp(12px, 3vw, 18px);
-      color: #ff00ff;
+      color: #244c7a;
       letter-spacing: 12px;
       margin-top: 8px;
       z-index: 1;
-      text-shadow: 0 0 10px #ff00ff;
+      text-shadow: 0 2px 8px rgba(255,255,255,0.7);
     }
     #startBtn {
       margin-top: 60px;
@@ -83,39 +76,29 @@
       font-size: clamp(18px, 4vw, 24px);
       font-weight: 700;
       letter-spacing: 6px;
-      color: #050510;
-      background: #00ffff;
+      color: #113357;
+      background: #ffd166;
       border: none;
       border-radius: 4px;
       cursor: pointer;
       z-index: 1;
       text-transform: uppercase;
-      box-shadow: 0 0 20px #00ffff, 0 0 40px rgba(0,255,255,0.3);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.2);
       animation: btnPulse 1.5s ease-in-out infinite;
       transition: transform 0.1s;
     }
     #startBtn:active { transform: scale(0.95); }
     @keyframes btnPulse {
-      0%, 100% { box-shadow: 0 0 20px #00ffff, 0 0 40px rgba(0,255,255,0.3); }
-      50% { box-shadow: 0 0 30px #00ffff, 0 0 60px rgba(0,255,255,0.5); }
+      0%, 100% { box-shadow: 0 8px 20px rgba(0,0,0,0.2); }
+      50% { box-shadow: 0 10px 28px rgba(0,0,0,0.26); }
     }
     #startScreen .hint {
       margin-top: 30px;
       font-size: clamp(11px, 2.5vw, 14px);
-      color: rgba(255,255,255,0.4);
+      color: rgba(27, 51, 79, 0.8);
       z-index: 1;
       letter-spacing: 2px;
     }
-    #startScreen .highscore-display {
-      margin-top: 16px;
-      font-size: clamp(13px, 3vw, 16px);
-      color: #ffff00;
-      z-index: 1;
-      letter-spacing: 2px;
-      text-shadow: 0 0 8px rgba(255,255,0,0.5);
-      display: none;
-    }
-
     /* ===== HUD ===== */
     #hud {
       position: fixed;
@@ -133,30 +116,45 @@
       font-weight: 700;
       color: #fff;
       letter-spacing: 4px;
-      text-shadow: 0 0 10px #00ffff;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.35);
     }
     #hud .speed {
       position: absolute;
       bottom: 30px; right: 20px;
       font-size: clamp(28px, 7vw, 48px);
       font-weight: 900;
-      color: #00ffff;
-      text-shadow: 0 0 15px #00ffff;
+      color: #ffffff;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.5);
     }
     #hud .speed span {
       font-size: 0.4em;
-      color: rgba(255,255,255,0.5);
+      color: rgba(255,255,255,0.75);
       font-weight: 400;
     }
-    #hud .combo {
+    #touchPad {
       position: absolute;
-      top: 60px; left: 50%;
-      transform: translateX(-50%);
-      font-size: clamp(14px, 3.5vw, 20px);
-      color: #ffff00;
-      text-shadow: 0 0 10px rgba(255,255,0,0.5);
-      opacity: 0;
-      transition: opacity 0.3s;
+      left: 20px;
+      bottom: 24px;
+      display: flex;
+      gap: 14px;
+      pointer-events: auto;
+    }
+    .touch-pad-btn {
+      width: clamp(64px, 14vw, 86px);
+      height: clamp(64px, 14vw, 86px);
+      border-radius: 16px;
+      border: 2px solid rgba(255,255,255,0.65);
+      background: rgba(19, 62, 102, 0.35);
+      color: #fff;
+      font-size: clamp(24px, 5vw, 32px);
+      font-weight: 900;
+      display: grid;
+      place-items: center;
+      backdrop-filter: blur(4px);
+      touch-action: none;
+    }
+    .touch-pad-btn.active {
+      background: rgba(255,255,255,0.35);
     }
 
     /* ===== SPEED LINES OVERLAY ===== */
@@ -167,7 +165,7 @@
       pointer-events: none;
       z-index: 45;
       opacity: 0;
-      background: radial-gradient(ellipse at center, transparent 30%, rgba(0,255,255,0.03) 100%);
+      background: radial-gradient(ellipse at center, transparent 30%, rgba(255,255,255,0.08) 100%);
     }
 
     /* ===== GAME OVER ===== */
@@ -180,7 +178,7 @@
       align-items: center;
       justify-content: center;
       z-index: 100;
-      background: rgba(5,5,16,0.92);
+      background: rgba(0,0,0,0.6);
     }
     #gameOver .title {
       font-size: clamp(36px, 9vw, 64px);
@@ -241,14 +239,14 @@
       top: 50%;
       transform: translateY(-50%);
       font-size: 40px;
-      color: rgba(0,255,255,0.15);
+      color: rgba(255,255,255,0.2);
       z-index: 49;
       pointer-events: none;
       transition: color 0.15s;
     }
     #steerLeft { left: 12px; }
     #steerRight { right: 12px; }
-    #steerLeft.active, #steerRight.active { color: rgba(0,255,255,0.6); }
+    #steerLeft.active, #steerRight.active { color: rgba(255,255,255,0.8); }
 
     /* ===== LOADING ===== */
     #loading {
@@ -259,8 +257,8 @@
       align-items: center;
       justify-content: center;
       z-index: 200;
-      background: #050510;
-      color: #00ffff;
+      background: #87ceeb;
+      color: #1b334f;
       font-size: 18px;
       letter-spacing: 4px;
     }
@@ -273,17 +271,19 @@
 
   <div id="startScreen">
     <div class="grid-bg"></div>
-    <div class="title">NEON RUSH</div>
-    <div class="subtitle">INFINITE SPEED</div>
+    <div class="title">OPEN ROAD DRIVE</div>
+    <div class="subtitle">FREE ROAM HIGHWAY</div>
     <button id="startBtn">START</button>
-    <div class="hint">DRAG LEFT / RIGHT TO STEER</div>
-    <div class="highscore-display" id="startHighScore">BEST: <span>0</span></div>
+    <div class="hint">터치패드 또는 드래그로 자유 주행하세요</div>
   </div>
 
   <div id="hud">
-    <div class="score" id="scoreDisplay">0</div>
-    <div class="combo" id="comboDisplay">NEAR MISS x1</div>
+    <div class="score" id="scoreDisplay">DIST 0 M</div>
     <div class="speed" id="speedDisplay">0<span> KM/H</span></div>
+    <div id="touchPad">
+      <button class="touch-pad-btn" id="touchPadLeft">◀</button>
+      <button class="touch-pad-btn" id="touchPadRight">▶</button>
+    </div>
   </div>
 
   <div id="speedLines"></div>
@@ -291,10 +291,8 @@
   <div id="steerRight">&#9654;</div>
 
   <div id="gameOver">
-    <div class="title">CRASHED</div>
-    <div class="final-score">SCORE: <em id="finalScore">0</em></div>
-    <div class="best-score" id="bestScoreDisplay">BEST: 0</div>
-    <div class="new-record" id="newRecord">NEW RECORD!</div>
+    <div class="title">DRIVE ENDED</div>
+    <div class="final-score">DISTANCE: <em id="finalScore">0</em> M</div>
     <button id="restartBtn">RETRY</button>
   </div>
 

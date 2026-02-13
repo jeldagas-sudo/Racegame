@@ -7,15 +7,15 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 // ============================================================
 // CONSTANTS
 // ============================================================
-const ROAD_WIDTH = 18;
-const LANE_COUNT = 5;
+const ROAD_WIDTH = 20;
+const LANE_COUNT = 3;
 const LANE_WIDTH = ROAD_WIDTH / LANE_COUNT;
 const CHUNK_LENGTH = 120;
 const VISIBLE_CHUNKS = 6;
-const BASE_SPEED = 40;
-const MAX_SPEED = 200;
-const SPEED_INCREASE_RATE = 0.8;
-const STEER_SPEED = 22;
+const BASE_SPEED = 90;
+const MAX_SPEED = 320;
+const SPEED_INCREASE_RATE = 5.5;
+const STEER_SPEED = 36;
 const STEER_LIMIT = ROAD_WIDTH / 2 - 1.2;
 const OBSTACLE_INTERVAL_MIN = 18;
 const OBSTACLE_INTERVAL_MAX = 45;
@@ -546,8 +546,8 @@ class WorldGenerator {
     this.groundMat = new THREE.ShaderMaterial({
       uniforms: {
         time: { value: 0 },
-        gridColor: { value: new THREE.Color(0x00ffff) },
-        fogColor: { value: new THREE.Color(0x050510) },
+        gridColor: { value: new THREE.Color(0x7ab85f) },
+        fogColor: { value: new THREE.Color(0xb9dcff) },
       },
       vertexShader: `
         varying vec2 vWorldPos;
@@ -584,38 +584,38 @@ class WorldGenerator {
 
     // Road material
     this.roadMat = new THREE.MeshStandardMaterial({
-      color: 0x0a0a18,
+      color: 0x3f3f3f,
       metalness: 0.3,
       roughness: 0.8,
     });
 
     // Lane marking material
     this.laneMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 0.5,
+      color: 0xf4f0d2,
+      emissive: 0x000000,
+      emissiveIntensity: 0.0,
       transparent: true,
       opacity: 0.6,
     });
 
     // Road edge material
     this.edgeMat = new THREE.MeshStandardMaterial({
-      color: 0xff00ff,
-      emissive: 0xff00ff,
-      emissiveIntensity: 1.0,
+      color: 0xcfcfcf,
+      emissive: 0x000000,
+      emissiveIntensity: 0.0,
     });
 
     // Building materials
     this.buildingMats = [
-      new THREE.MeshStandardMaterial({ color: 0x0a0a1a, metalness: 0.5, roughness: 0.5 }),
-      new THREE.MeshStandardMaterial({ color: 0x0e0e24, metalness: 0.5, roughness: 0.5 }),
-      new THREE.MeshStandardMaterial({ color: 0x12122a, metalness: 0.5, roughness: 0.5 }),
+      new THREE.MeshStandardMaterial({ color: 0xd8d4c9, metalness: 0.1, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({ color: 0xcac6bb, metalness: 0.1, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({ color: 0xe1ddd1, metalness: 0.1, roughness: 0.9 }),
     ];
 
     this.windowMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 0.8,
+      color: 0xa6c8e0,
+      emissive: 0x000000,
+      emissiveIntensity: 0.0,
       transparent: true,
       opacity: 0.6,
     });
@@ -667,7 +667,7 @@ class WorldGenerator {
       }
     }
 
-    // Road edges (continuous neon strips)
+    // Road edges
     const edgeGeom = new THREE.BoxGeometry(0.15, 0.3, CHUNK_LENGTH);
     const leftEdge = new THREE.Mesh(edgeGeom, this.edgeMat);
     leftEdge.position.set(-ROAD_WIDTH / 2 - 0.1, 0.15, zStart - CHUNK_LENGTH / 2);
@@ -705,14 +705,14 @@ class WorldGenerator {
       building.position.set(baseX + offsetX, height / 2, z - depth / 2);
       chunk.add(building);
 
-      // Neon accent on building
-      if (Math.random() > 0.3) {
-        const accentColors = [0x00ffff, 0xff00ff, 0xffff00, 0xff0044, 0x00ff88];
+      // Occasional architectural accent
+      if (Math.random() > 0.92) {
+        const accentColors = [0x8aa7c4, 0xb7b4a8, 0xc6d7e8];
         const accentColor = accentColors[Math.floor(Math.random() * accentColors.length)];
         const accentMat = new THREE.MeshStandardMaterial({
           color: accentColor,
           emissive: accentColor,
-          emissiveIntensity: 1.2,
+          emissiveIntensity: 0.05,
         });
 
         // Horizontal neon stripe
@@ -801,7 +801,7 @@ class WorldGenerator {
     return pad;
   }
 
-  update(playerZ, score) {
+  update(playerZ) {
     // Generate chunks ahead
     while (this.furthestZ > playerZ - CHUNK_LENGTH * VISIBLE_CHUNKS) {
       this.furthestZ -= CHUNK_LENGTH;
@@ -819,23 +819,14 @@ class WorldGenerator {
       }
     }
 
-    // Spawn obstacles ahead
+    // Spawn world events ahead
     while (this.nextObstacleZ > playerZ - CHUNK_LENGTH * (VISIBLE_CHUNKS - 1)) {
-      this.spawnObstacle(this.nextObstacleZ);
-
-      // Occasionally spawn a second obstacle in a different lane
-      const difficulty = Math.min(score / 5000, 1);
-      if (Math.random() < difficulty * 0.6) {
-        this.spawnObstacle(this.nextObstacleZ + (Math.random() - 0.5) * 10);
+      const openness = 1.0;
+      if (Math.random() < 0.08) {
+        this.spawnBoostPad(this.nextObstacleZ - 10);
       }
-
-      // Spawn boost pads occasionally
-      if (Math.random() < 0.15) {
-        this.spawnBoostPad(this.nextObstacleZ - 15);
-      }
-
-      const interval = OBSTACLE_INTERVAL_MAX - (OBSTACLE_INTERVAL_MAX - OBSTACLE_INTERVAL_MIN) * difficulty;
-      this.nextObstacleZ -= interval + Math.random() * interval * 0.5;
+      const interval = 60 + Math.random() * 50 * openness;
+      this.nextObstacleZ -= interval;
     }
 
     // Remove passed obstacles
@@ -876,7 +867,9 @@ class WorldGenerator {
 // TOUCH CONTROLS
 // ============================================================
 class TouchControls {
-  constructor() {
+  constructor(leftBtn, rightBtn) {
+    this.leftBtn = leftBtn;
+    this.rightBtn = rightBtn;
     this.steerInput = 0;    // -1 to 1
     this.touchStartX = 0;
     this.touching = false;
@@ -901,6 +894,30 @@ class TouchControls {
     window.addEventListener('resize', () => {
       this.screenWidth = window.innerWidth;
     });
+
+    this.bindPadButton(this.leftBtn, -1);
+    this.bindPadButton(this.rightBtn, 1);
+  }
+
+
+  bindPadButton(button, value) {
+    if (!button) return;
+    const activate = (e) => {
+      e.preventDefault();
+      this.touching = true;
+      this.steerInput = value;
+    };
+    const release = (e) => {
+      e.preventDefault();
+      this.touching = false;
+      this.steerInput = 0;
+    };
+    button.addEventListener('touchstart', activate, { passive: false });
+    button.addEventListener('touchend', release, { passive: false });
+    button.addEventListener('touchcancel', release, { passive: false });
+    button.addEventListener('mousedown', activate);
+    button.addEventListener('mouseup', release);
+    button.addEventListener('mouseleave', release);
   }
 
   onTouchStart(e) {
@@ -966,7 +983,7 @@ class Game {
     this.comboCount = 0;
     this.comboTimer = 0;
     this.cameraShake = { x: 0, y: 0 };
-    this.highScore = parseInt(localStorage.getItem('neonrush_highscore') || '0');
+    this.highScore = 0;
 
     // DOM elements
     this.startScreen = document.getElementById('startScreen');
@@ -974,21 +991,14 @@ class Game {
     this.gameOverEl = document.getElementById('gameOver');
     this.scoreDisplay = document.getElementById('scoreDisplay');
     this.speedDisplay = document.getElementById('speedDisplay');
-    this.comboDisplay = document.getElementById('comboDisplay');
     this.finalScoreEl = document.getElementById('finalScore');
-    this.bestScoreEl = document.getElementById('bestScoreDisplay');
-    this.newRecordEl = document.getElementById('newRecord');
     this.speedLinesEl = document.getElementById('speedLines');
     this.steerLeftEl = document.getElementById('steerLeft');
     this.steerRightEl = document.getElementById('steerRight');
     this.loadingEl = document.getElementById('loading');
-    this.startHighScoreEl = document.getElementById('startHighScore');
+    this.touchPadLeftEl = document.getElementById('touchPadLeft');
+    this.touchPadRightEl = document.getElementById('touchPadRight');
 
-    // Show high score on start screen
-    if (this.highScore > 0) {
-      this.startHighScoreEl.style.display = 'block';
-      this.startHighScoreEl.querySelector('span').textContent = this.highScore;
-    }
 
     // Three.js setup
     this.canvas = document.getElementById('gameCanvas');
@@ -1004,8 +1014,8 @@ class Game {
 
     // Scene
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x050510);
-    this.scene.fog = new THREE.FogExp2(0x050510, 0.006);
+    this.scene.background = new THREE.Color(0x87ceeb);
+    this.scene.fog = new THREE.FogExp2(0xb9dcff, 0.0022);
 
     // Camera
     this.baseFOV = 65;
@@ -1019,15 +1029,15 @@ class Game {
     this.camera.lookAt(0, 1, -20);
 
     // Lighting
-    const ambient = new THREE.AmbientLight(0x111133, 0.5);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.65);
     this.scene.add(ambient);
 
-    const dirLight = new THREE.DirectionalLight(0x6666aa, 0.3);
+    const dirLight = new THREE.DirectionalLight(0xfff6dd, 1.0);
     dirLight.position.set(5, 20, 10);
     this.scene.add(dirLight);
 
     // Hemisphere light for subtle sky/ground distinction
-    const hemiLight = new THREE.HemisphereLight(0x0a0a2e, 0x050510, 0.4);
+    const hemiLight = new THREE.HemisphereLight(0x89c4ff, 0x6b8f4e, 0.7);
     this.scene.add(hemiLight);
 
     // Post-processing
@@ -1036,7 +1046,7 @@ class Game {
 
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      1.2,   // strength
+      0.35,   // strength
       0.4,   // radius
       0.85   // threshold
     );
@@ -1053,7 +1063,7 @@ class Game {
 
     this.world = new WorldGenerator(this.scene);
     this.particles = new SpeedParticles(this.scene);
-    this.controls = new TouchControls();
+    this.controls = new TouchControls(this.touchPadLeftEl, this.touchPadRightEl);
     this.audio = new AudioManager();
 
     // Skybox-like distant elements (subtle neon horizon)
@@ -1085,34 +1095,23 @@ class Game {
   }
 
   createSkyElements() {
-    // Distant neon horizon lines
-    const horizonGeom = new THREE.PlaneGeometry(500, 0.5);
-    const horizonMat = new THREE.MeshBasicMaterial({
-      color: 0xff00ff,
+    const cloudMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
       transparent: true,
-      opacity: 0.15,
-      blending: THREE.AdditiveBlending,
+      opacity: 0.55,
+      depthWrite: false,
     });
 
-    for (let i = 0; i < 5; i++) {
-      const line = new THREE.Mesh(horizonGeom, horizonMat.clone());
-      line.position.set(0, 0.5 + i * 3, -350);
-      line.material.opacity = 0.08 - i * 0.01;
-      this.scene.add(line);
+    this.clouds = [];
+    for (let i = 0; i < 12; i++) {
+      const cloud = new THREE.Mesh(
+        new THREE.PlaneGeometry(45 + Math.random() * 35, 12 + Math.random() * 8),
+        cloudMat.clone()
+      );
+      cloud.position.set((Math.random() - 0.5) * 220, 24 + Math.random() * 20, -120 - Math.random() * 420);
+      this.scene.add(cloud);
+      this.clouds.push(cloud);
     }
-
-    // Distant "sun" glow
-    const sunGeom = new THREE.PlaneGeometry(80, 80);
-    const sunMat = new THREE.MeshBasicMaterial({
-      color: 0xff0066,
-      transparent: true,
-      opacity: 0.08,
-      blending: THREE.AdditiveBlending,
-    });
-    const sun = new THREE.Mesh(sunGeom, sunMat);
-    sun.position.set(0, 20, -380);
-    this.scene.add(sun);
-    this.sunMesh = sun;
   }
 
   startGame(options = {}) {
@@ -1177,20 +1176,11 @@ class Game {
     // Screen shake
     this.cameraShake = { x: 2, y: 1 };
 
-    // Update high score
-    const isNewRecord = this.score > this.highScore;
-    if (isNewRecord) {
-      this.highScore = this.score;
-      localStorage.setItem('neonrush_highscore', String(this.highScore));
-    }
-
     // Show game over screen after delay
     setTimeout(() => {
       this.hudEl.style.display = 'none';
       this.gameOverEl.style.display = 'flex';
-      this.finalScoreEl.textContent = this.score;
-      this.bestScoreEl.textContent = `BEST: ${this.highScore}`;
-      this.newRecordEl.style.display = isNewRecord ? 'block' : 'none';
+      this.finalScoreEl.textContent = Math.floor(this.distance);
     }, 600);
   }
 
@@ -1217,8 +1207,6 @@ class Game {
         this.score += 50 * this.comboCount;
         this.audio.playNearMiss();
 
-        this.comboDisplay.textContent = `NEAR MISS x${this.comboCount}  +${50 * this.comboCount}`;
-        this.comboDisplay.style.opacity = '1';
       }
     }
 
@@ -1256,7 +1244,7 @@ class Game {
     const moveDistance = currentSpeed * delta;
     this.vehicle.position.z -= moveDistance;
     this.distance += moveDistance;
-    this.score = Math.floor(this.distance);
+    this.score = this.distance;
 
     // Steering
     const steerInput = this.controls.getSteerInput();
@@ -1271,18 +1259,16 @@ class Game {
     // Steer indicators
     this.steerLeftEl.classList.toggle('active', steerInput < -0.2);
     this.steerRightEl.classList.toggle('active', steerInput > 0.2);
+    this.touchPadLeftEl?.classList.toggle('active', steerInput < -0.2);
+    this.touchPadRightEl?.classList.toggle('active', steerInput > 0.2);
 
     // Combo timer
     if (this.comboTimer > 0) {
       this.comboTimer -= delta;
       if (this.comboTimer <= 0) {
         this.comboCount = 0;
-        this.comboDisplay.style.opacity = '0';
       }
     }
-
-    // Collisions
-    this.checkCollisions();
 
     // Camera follow
     const speedNorm = Math.min(currentSpeed / MAX_SPEED, 1);
@@ -1317,30 +1303,33 @@ class Game {
     this.camera.updateProjectionMatrix();
 
     // Radial blur intensity
-    this.radialBlurPass.uniforms.intensity.value = speedNorm * speedNorm * 1.2;
+    this.radialBlurPass.uniforms.intensity.value = speedNorm * speedNorm * 0.9;
 
     // Bloom intensity
-    this.bloomPass.strength = 1.0 + speedNorm * 0.8;
+    this.bloomPass.strength = 0.25 + speedNorm * 0.15;
 
     // Speed lines overlay
     this.speedLinesEl.style.opacity = String(speedNorm * speedNorm * 0.8);
 
     // Update world
-    this.world.update(this.vehicle.position.z, this.score);
+    this.world.update(this.vehicle.position.z, this.distance);
 
     // Update particles
     this.particles.update(currentSpeed, this.vehicle.position.z);
 
-    // Move sun with player
-    if (this.sunMesh) {
-      this.sunMesh.position.z = this.vehicle.position.z - 380;
+    // Move clouds with player
+    if (this.clouds) {
+      for (const cloud of this.clouds) {
+        if (cloud.position.z > this.vehicle.position.z + 70) cloud.position.z = this.vehicle.position.z - 480 - Math.random() * 120;
+        cloud.position.z += currentSpeed * delta * 0.06;
+      }
     }
 
     // Update audio
     this.audio.updateEngine(speedNorm);
 
     // Update HUD
-    this.scoreDisplay.textContent = this.score;
+    this.scoreDisplay.textContent = `DIST ${Math.floor(this.distance)} M`;
     const displaySpeed = Math.floor(currentSpeed * 3.6); // Convert to km/h feel
     this.speedDisplay.innerHTML = `${displaySpeed}<span> KM/H</span>`;
   }
@@ -1363,9 +1352,6 @@ class Game {
       this.world.update(this.camera.position.z - 10, 0);
       this.particles.update(30, this.camera.position.z);
 
-      if (this.sunMesh) {
-        this.sunMesh.position.z = this.camera.position.z - 380;
-      }
     }
 
     this.composer.render();
