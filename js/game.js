@@ -7,20 +7,22 @@ import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 // ============================================================
 // CONSTANTS
 // ============================================================
-const ROAD_WIDTH = 18;
-const LANE_COUNT = 5;
+const ROAD_WIDTH = 28;
+const LANE_COUNT = 2;
 const LANE_WIDTH = ROAD_WIDTH / LANE_COUNT;
-const CHUNK_LENGTH = 120;
+const CHUNK_LENGTH = 140;
 const VISIBLE_CHUNKS = 6;
-const BASE_SPEED = 40;
-const MAX_SPEED = 200;
-const SPEED_INCREASE_RATE = 0.8;
-const STEER_SPEED = 22;
-const STEER_LIMIT = ROAD_WIDTH / 2 - 1.2;
+const BASE_SPEED = 82;
+const MAX_SPEED = 320;
+const SPEED_INCREASE_RATE = 0.35;
+const STEER_SPEED = 0;
+const STEER_LIMIT = 210;
 const OBSTACLE_INTERVAL_MIN = 18;
 const OBSTACLE_INTERVAL_MAX = 45;
 const NEAR_MISS_DISTANCE = 2.8;
 const COLLISION_DISTANCE = 1.3;
+const TURN_RATE = 1.65;
+const MAP_LIMIT = 220;
 
 // ============================================================
 // RADIAL BLUR SHADER
@@ -68,6 +70,7 @@ class AudioManager {
     this.masterGain = null;
     this.engineNodes = null;
     this.windNode = null;
+    this.turnSfxCooldown = 0;
   }
 
   init() {
@@ -176,7 +179,8 @@ class AudioManager {
     this.windNode = { source: noiseSource, gain: windGain, filter: windFilter };
   }
 
-  updateEngine(speedNorm) {
+  updateEngine(speedNorm, delta = 0) {
+    this.turnSfxCooldown = Math.max(0, this.turnSfxCooldown - delta);
     if (!this.engineNodes) return;
     const t = Math.min(speedNorm, 1);
 
@@ -193,6 +197,36 @@ class AudioManager {
       this.windNode.gain.gain.value = t * t * 0.15;
       this.windNode.filter.frequency.value = 400 + t * 2500;
     }
+  }
+
+
+  playTurnSkid() {
+    if (!this.initialized || this.turnSfxCooldown > 0) return;
+    this.resume();
+    this.turnSfxCooldown = 0.18;
+    const ctx = this.ctx;
+
+    const buffer = ctx.createBuffer(1, ctx.sampleRate * 0.08, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+    }
+
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 1800;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.0;
+    gain.gain.linearRampToValueAtTime(0.08, ctx.currentTime + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.1);
+
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(this.masterGain);
+    source.start();
+    source.stop(ctx.currentTime + 0.1);
   }
 
   stopEngine() {
@@ -214,6 +248,7 @@ class AudioManager {
       setTimeout(() => {
         try { this.windNode.source.stop(); } catch (e) {}
         this.windNode = null;
+    this.turnSfxCooldown = 0;
       }, 400);
     }
   }
@@ -330,7 +365,7 @@ function createVehicle() {
   // Body
   const bodyGeom = new THREE.BoxGeometry(1.8, 0.5, 4.0);
   const bodyMat = new THREE.MeshStandardMaterial({
-    color: 0x111122,
+    color: 0xf36f6f,
     metalness: 0.9,
     roughness: 0.2,
   });
@@ -341,7 +376,7 @@ function createVehicle() {
   // Cabin
   const cabinGeom = new THREE.BoxGeometry(1.4, 0.45, 1.8);
   const cabinMat = new THREE.MeshStandardMaterial({
-    color: 0x0a0a1a,
+    color: 0xc7d9ff,
     metalness: 0.8,
     roughness: 0.1,
     transparent: true,
@@ -351,8 +386,8 @@ function createVehicle() {
   cabin.position.set(0, 0.95, -0.3);
   group.add(cabin);
 
-  // Neon underglow
-  const underglow = new THREE.PointLight(0x00ffff, 2, 6);
+  // Soft underglow
+  const underglow = new THREE.PointLight(0xffc9de, 1.2, 5);
   underglow.position.set(0, 0.15, 0);
   group.add(underglow);
 
@@ -404,12 +439,12 @@ function createVehicle() {
     group.add(wheel);
   });
 
-  // Neon side strips
+  // Side accent strips
   const stripGeom = new THREE.BoxGeometry(0.05, 0.08, 3.6);
   const stripMat = new THREE.MeshStandardMaterial({
-    color: 0x00ffff,
-    emissive: 0x00ffff,
-    emissiveIntensity: 1.5,
+    color: 0xfff5b8,
+    emissive: 0xfff5b8,
+    emissiveIntensity: 0.5,
   });
   const strip1 = new THREE.Mesh(stripGeom, stripMat);
   strip1.position.set(-0.92, 0.35, 0);
@@ -498,7 +533,7 @@ class SpeedParticles {
     this.positions = positions;
 
     const mat = new THREE.PointsMaterial({
-      color: 0x00ffff,
+      color: 0xf7fbff,
       size: 0.15,
       transparent: true,
       opacity: 0.6,
@@ -536,339 +571,138 @@ class SpeedParticles {
 class WorldGenerator {
   constructor(scene) {
     this.scene = scene;
-    this.chunks = [];
-    this.obstacles = [];
-    this.boostPads = [];
-    this.nextObstacleZ = -80;
-    this.furthestZ = 0;
+    this.tiles = new Map();
+    this.tileSize = 110;
+    this.tileRadius = 2;
 
-    // Ground grid shader material
-    this.groundMat = new THREE.ShaderMaterial({
-      uniforms: {
-        time: { value: 0 },
-        gridColor: { value: new THREE.Color(0x00ffff) },
-        fogColor: { value: new THREE.Color(0x050510) },
-      },
-      vertexShader: `
-        varying vec2 vWorldPos;
-        varying float vDist;
-        void main() {
-          vec4 worldPos = modelMatrix * vec4(position, 1.0);
-          vWorldPos = worldPos.xz;
-          vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-          vDist = -mvPos.z;
-          gl_Position = projectionMatrix * mvPos;
-        }
-      `,
-      fragmentShader: `
-        uniform float time;
-        uniform vec3 gridColor;
-        uniform vec3 fogColor;
-        varying vec2 vWorldPos;
-        varying float vDist;
-        void main() {
-          vec2 grid = abs(fract(vWorldPos * 0.2) - 0.5);
-          float line = min(grid.x, grid.y);
-          float gridLine = 1.0 - smoothstep(0.0, 0.03, line);
-          float fog = exp(-vDist * 0.004);
-          float edgeFade = smoothstep(0.0, 2.0, abs(vWorldPos.x) - 8.0);
-          vec3 color = mix(fogColor, gridColor * 0.4, gridLine * fog);
-          float alpha = max(gridLine * fog * 0.6, 0.0);
-          alpha = mix(alpha, alpha * 0.3, edgeFade);
-          gl_FragColor = vec4(color, alpha + 0.02);
-        }
-      `,
-      transparent: true,
-      side: THREE.DoubleSide,
-    });
-
-    // Road material
-    this.roadMat = new THREE.MeshStandardMaterial({
-      color: 0x0a0a18,
-      metalness: 0.3,
-      roughness: 0.8,
-    });
-
-    // Lane marking material
-    this.laneMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 0.5,
-      transparent: true,
-      opacity: 0.6,
-    });
-
-    // Road edge material
-    this.edgeMat = new THREE.MeshStandardMaterial({
-      color: 0xff00ff,
-      emissive: 0xff00ff,
-      emissiveIntensity: 1.0,
-    });
-
-    // Building materials
-    this.buildingMats = [
-      new THREE.MeshStandardMaterial({ color: 0x0a0a1a, metalness: 0.5, roughness: 0.5 }),
-      new THREE.MeshStandardMaterial({ color: 0x0e0e24, metalness: 0.5, roughness: 0.5 }),
-      new THREE.MeshStandardMaterial({ color: 0x12122a, metalness: 0.5, roughness: 0.5 }),
+    this.groundMats = [
+      new THREE.MeshStandardMaterial({ color: 0xc9eec6, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0xbfe5f7, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0xf7e6bd, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: 0xe8d6f8, roughness: 0.95 }),
     ];
 
-    this.windowMat = new THREE.MeshStandardMaterial({
-      color: 0x00ffff,
-      emissive: 0x00ffff,
-      emissiveIntensity: 0.8,
-      transparent: true,
-      opacity: 0.6,
+    this.roadMat = new THREE.MeshStandardMaterial({
+      color: 0xd8d2c8,
+      roughness: 0.92,
+      metalness: 0.05,
     });
 
-    // Boost pad material
-    this.boostMat = new THREE.MeshStandardMaterial({
-      color: 0xffff00,
-      emissive: 0xffff00,
-      emissiveIntensity: 2.0,
-      transparent: true,
-      opacity: 0.8,
+    this.roadLineMat = new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      roughness: 0.7,
     });
   }
 
-  createChunk(zStart) {
-    const chunk = new THREE.Group();
-    chunk.userData.zStart = zStart;
-    chunk.userData.zEnd = zStart - CHUNK_LENGTH;
+  createChunk() {}
+  spawnObstacle() {}
+  spawnBoostPad() {}
 
-    // Road surface
-    const road = new THREE.Mesh(
-      new THREE.PlaneGeometry(ROAD_WIDTH, CHUNK_LENGTH),
-      this.roadMat
-    );
-    road.rotation.x = -Math.PI / 2;
-    road.position.set(0, 0.01, zStart - CHUNK_LENGTH / 2);
-    chunk.add(road);
+  createTile(tx, tz) {
+    const tile = new THREE.Group();
+    const x0 = tx * this.tileSize;
+    const z0 = tz * this.tileSize;
 
-    // Ground grid (extends beyond road)
     const ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(120, CHUNK_LENGTH),
-      this.groundMat
+      new THREE.PlaneGeometry(this.tileSize, this.tileSize),
+      this.groundMats[Math.abs((tx * 13 + tz * 17)) % this.groundMats.length]
     );
     ground.rotation.x = -Math.PI / 2;
-    ground.position.set(0, 0, zStart - CHUNK_LENGTH / 2);
-    chunk.add(ground);
+    ground.position.set(x0, 0, z0);
+    tile.add(ground);
 
-    // Lane markings (dashed)
-    for (let lane = 1; lane < LANE_COUNT; lane++) {
-      const x = -ROAD_WIDTH / 2 + lane * LANE_WIDTH;
-      for (let d = 0; d < CHUNK_LENGTH; d += 6) {
-        const dash = new THREE.Mesh(
-          new THREE.PlaneGeometry(0.08, 2.5),
-          this.laneMat
+    const roadW = 22;
+    const roadX = new THREE.Mesh(new THREE.PlaneGeometry(roadW, this.tileSize), this.roadMat);
+    roadX.rotation.x = -Math.PI / 2;
+    roadX.position.set(x0, 0.02, z0);
+    tile.add(roadX);
+
+    const roadZ = new THREE.Mesh(new THREE.PlaneGeometry(this.tileSize, roadW), this.roadMat);
+    roadZ.rotation.x = -Math.PI / 2;
+    roadZ.position.set(x0, 0.021, z0);
+    tile.add(roadZ);
+
+    const lineA = new THREE.Mesh(new THREE.PlaneGeometry(0.3, this.tileSize), this.roadLineMat);
+    lineA.rotation.x = -Math.PI / 2;
+    lineA.position.set(x0, 0.03, z0);
+    tile.add(lineA);
+
+    const lineB = new THREE.Mesh(new THREE.PlaneGeometry(this.tileSize, 0.3), this.roadLineMat);
+    lineB.rotation.x = -Math.PI / 2;
+    lineB.position.set(x0, 0.031, z0);
+    tile.add(lineB);
+
+    for (let i = 0; i < 16; i++) {
+      const px = x0 + (Math.random() - 0.5) * this.tileSize * 0.9;
+      const pz = z0 + (Math.random() - 0.5) * this.tileSize * 0.9;
+      if (Math.abs(px - x0) < 16 || Math.abs(pz - z0) < 16) continue;
+
+      if (Math.random() < 0.6) {
+        const tree = new THREE.Group();
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.5, 0.65, 3.2, 8),
+          new THREE.MeshStandardMaterial({ color: 0x9b7653, roughness: 0.95 })
         );
-        dash.rotation.x = -Math.PI / 2;
-        dash.position.set(x, 0.02, zStart - d - 1.25);
-        chunk.add(dash);
-      }
-    }
+        trunk.position.y = 1.6;
+        tree.add(trunk);
 
-    // Road edges (continuous neon strips)
-    const edgeGeom = new THREE.BoxGeometry(0.15, 0.3, CHUNK_LENGTH);
-    const leftEdge = new THREE.Mesh(edgeGeom, this.edgeMat);
-    leftEdge.position.set(-ROAD_WIDTH / 2 - 0.1, 0.15, zStart - CHUNK_LENGTH / 2);
-    chunk.add(leftEdge);
-
-    const rightEdge = new THREE.Mesh(edgeGeom, this.edgeMat);
-    rightEdge.position.set(ROAD_WIDTH / 2 + 0.1, 0.15, zStart - CHUNK_LENGTH / 2);
-    chunk.add(rightEdge);
-
-    // Buildings on both sides
-    this.generateBuildings(chunk, zStart, -1); // Left
-    this.generateBuildings(chunk, zStart, 1);  // Right
-
-    this.scene.add(chunk);
-    this.chunks.push(chunk);
-    return chunk;
-  }
-
-  generateBuildings(chunk, zStart, side) {
-    const baseX = side * (ROAD_WIDTH / 2 + 8);
-    let z = zStart;
-
-    while (z > zStart - CHUNK_LENGTH) {
-      const width = 3 + Math.random() * 8;
-      const height = 5 + Math.random() * 40;
-      const depth = 4 + Math.random() * 8;
-
-      const mat = this.buildingMats[Math.floor(Math.random() * this.buildingMats.length)];
-      const building = new THREE.Mesh(
-        new THREE.BoxGeometry(width, height, depth),
-        mat
-      );
-
-      const offsetX = side * (Math.random() * 10);
-      building.position.set(baseX + offsetX, height / 2, z - depth / 2);
-      chunk.add(building);
-
-      // Neon accent on building
-      if (Math.random() > 0.3) {
-        const accentColors = [0x00ffff, 0xff00ff, 0xffff00, 0xff0044, 0x00ff88];
-        const accentColor = accentColors[Math.floor(Math.random() * accentColors.length)];
-        const accentMat = new THREE.MeshStandardMaterial({
-          color: accentColor,
-          emissive: accentColor,
-          emissiveIntensity: 1.2,
-        });
-
-        // Horizontal neon stripe
-        const stripeHeight = 0.15;
-        const stripeY = height * (0.3 + Math.random() * 0.5);
-        const stripe = new THREE.Mesh(
-          new THREE.BoxGeometry(width + 0.1, stripeHeight, depth + 0.1),
-          accentMat
+        const crown = new THREE.Mesh(
+          new THREE.SphereGeometry(2.3 + Math.random() * 0.8, 10, 10),
+          new THREE.MeshStandardMaterial({
+            color: [0x8ed39a, 0x9cc8f2, 0xf5c2dd, 0xf7dca8][Math.floor(Math.random()*4)],
+            roughness: 0.9,
+          })
         );
-        stripe.position.set(baseX + offsetX, stripeY, z - depth / 2);
-        chunk.add(stripe);
+        crown.position.y = 4.2;
+        tree.add(crown);
+        tree.position.set(px, 0, pz);
+        tile.add(tree);
+      } else {
+        const h = 6 + Math.random() * 18;
+        const building = new THREE.Mesh(
+          new THREE.BoxGeometry(6 + Math.random() * 8, h, 6 + Math.random() * 8),
+          new THREE.MeshStandardMaterial({
+            color: [0xf8c9c9, 0xc9e0ff, 0xd7f3cf, 0xf9e4b7, 0xe3d2ff][Math.floor(Math.random()*5)],
+            roughness: 0.8,
+            metalness: 0.05,
+          })
+        );
+        building.position.set(px, h / 2, pz);
+        tile.add(building);
       }
-
-      // Windows
-      if (height > 10 && Math.random() > 0.4) {
-        const windowRows = Math.floor(height / 4);
-        const windowCols = Math.floor(width / 2);
-        const faceSide = side > 0 ? -1 : 1;
-        for (let row = 0; row < windowRows; row++) {
-          for (let col = 0; col < windowCols; col++) {
-            if (Math.random() > 0.4) {
-              const win = new THREE.Mesh(
-                new THREE.PlaneGeometry(0.8, 1.2),
-                this.windowMat
-              );
-              win.position.set(
-                baseX + offsetX + faceSide * (width / 2 + 0.01),
-                2 + row * 4,
-                z - depth / 2 + (col - windowCols / 2) * 2
-              );
-              win.rotation.y = faceSide > 0 ? 0 : Math.PI;
-              chunk.add(win);
-            }
-          }
-        }
-      }
-
-      z -= depth + 1 + Math.random() * 3;
     }
+
+    this.scene.add(tile);
+    this.tiles.set(`${tx},${tz}`, tile);
   }
 
-  spawnObstacle(z) {
-    const lane = Math.floor(Math.random() * LANE_COUNT);
-    const x = -ROAD_WIDTH / 2 + LANE_WIDTH / 2 + lane * LANE_WIDTH;
+  update(playerX, playerZ) {
+    const tx = Math.floor(playerX / this.tileSize);
+    const tz = Math.floor(playerZ / this.tileSize);
 
-    const obstacle = createObstacleVehicle();
-    obstacle.position.set(x, 0, z);
-    obstacle.userData.lane = lane;
-    obstacle.userData.active = true;
-
-    this.scene.add(obstacle);
-    this.obstacles.push(obstacle);
-    return obstacle;
-  }
-
-  spawnBoostPad(z) {
-    const lane = Math.floor(Math.random() * LANE_COUNT);
-    const x = -ROAD_WIDTH / 2 + LANE_WIDTH / 2 + lane * LANE_WIDTH;
-
-    const pad = new THREE.Group();
-    const base = new THREE.Mesh(
-      new THREE.BoxGeometry(LANE_WIDTH * 0.8, 0.05, 3),
-      this.boostMat
-    );
-    base.position.y = 0.03;
-    pad.add(base);
-
-    // Arrow shape
-    const arrow = new THREE.Mesh(
-      new THREE.ConeGeometry(0.5, 1.5, 4),
-      this.boostMat
-    );
-    arrow.rotation.x = Math.PI / 2;
-    arrow.position.set(0, 0.4, 0);
-    pad.add(arrow);
-
-    const light = new THREE.PointLight(0xffff00, 2, 8);
-    light.position.set(0, 1, 0);
-    pad.add(light);
-
-    pad.position.set(x, 0, z);
-    pad.userData.active = true;
-
-    this.scene.add(pad);
-    this.boostPads.push(pad);
-    return pad;
-  }
-
-  update(playerZ, score) {
-    // Generate chunks ahead
-    while (this.furthestZ > playerZ - CHUNK_LENGTH * VISIBLE_CHUNKS) {
-      this.furthestZ -= CHUNK_LENGTH;
-      this.createChunk(this.furthestZ);
-    }
-
-    // Remove old chunks
-    for (let i = this.chunks.length - 1; i >= 0; i--) {
-      if (this.chunks[i].userData.zStart > playerZ + CHUNK_LENGTH) {
-        this.scene.remove(this.chunks[i]);
-        this.chunks[i].traverse((child) => {
-          if (child.geometry) child.geometry.dispose();
-        });
-        this.chunks.splice(i, 1);
+    for (let x = tx - this.tileRadius; x <= tx + this.tileRadius; x++) {
+      for (let z = tz - this.tileRadius; z <= tz + this.tileRadius; z++) {
+        const key = `${x},${z}`;
+        if (!this.tiles.has(key)) this.createTile(x, z);
       }
     }
 
-    // Spawn obstacles ahead
-    while (this.nextObstacleZ > playerZ - CHUNK_LENGTH * (VISIBLE_CHUNKS - 1)) {
-      this.spawnObstacle(this.nextObstacleZ);
-
-      // Occasionally spawn a second obstacle in a different lane
-      const difficulty = Math.min(score / 5000, 1);
-      if (Math.random() < difficulty * 0.6) {
-        this.spawnObstacle(this.nextObstacleZ + (Math.random() - 0.5) * 10);
-      }
-
-      // Spawn boost pads occasionally
-      if (Math.random() < 0.15) {
-        this.spawnBoostPad(this.nextObstacleZ - 15);
-      }
-
-      const interval = OBSTACLE_INTERVAL_MAX - (OBSTACLE_INTERVAL_MAX - OBSTACLE_INTERVAL_MIN) * difficulty;
-      this.nextObstacleZ -= interval + Math.random() * interval * 0.5;
-    }
-
-    // Remove passed obstacles
-    for (let i = this.obstacles.length - 1; i >= 0; i--) {
-      if (this.obstacles[i].position.z > playerZ + 30) {
-        this.scene.remove(this.obstacles[i]);
-        this.obstacles.splice(i, 1);
-      }
-    }
-
-    // Remove passed boost pads
-    for (let i = this.boostPads.length - 1; i >= 0; i--) {
-      if (this.boostPads[i].position.z > playerZ + 30) {
-        this.scene.remove(this.boostPads[i]);
-        this.boostPads.splice(i, 1);
+    for (const [key, tile] of this.tiles) {
+      const [x, z] = key.split(',').map(Number);
+      if (Math.abs(x - tx) > this.tileRadius + 1 || Math.abs(z - tz) > this.tileRadius + 1) {
+        this.scene.remove(tile);
+        tile.traverse((child) => { if (child.geometry) child.geometry.dispose(); });
+        this.tiles.delete(key);
       }
     }
   }
 
   reset() {
-    this.chunks.forEach((c) => {
-      this.scene.remove(c);
-      c.traverse((child) => {
-        if (child.geometry) child.geometry.dispose();
-      });
-    });
-    this.obstacles.forEach((o) => this.scene.remove(o));
-    this.boostPads.forEach((b) => this.scene.remove(b));
-    this.chunks = [];
-    this.obstacles = [];
-    this.boostPads = [];
-    this.nextObstacleZ = -80;
-    this.furthestZ = 0;
+    for (const tile of this.tiles.values()) {
+      this.scene.remove(tile);
+      tile.traverse((child) => { if (child.geometry) child.geometry.dispose(); });
+    }
+    this.tiles.clear();
   }
 }
 
@@ -881,12 +715,24 @@ class TouchControls {
     this.touchStartX = 0;
     this.touching = false;
     this.screenWidth = window.innerWidth;
+    this.touchPadEl = document.getElementById('touchPad');
+    this.touchKnobEl = document.getElementById('touchKnob');
+    this.padActive = false;
 
-    // Touch events
+    // Touch events (screen drag fallback)
     window.addEventListener('touchstart', (e) => this.onTouchStart(e), { passive: false });
     window.addEventListener('touchmove', (e) => this.onTouchMove(e), { passive: false });
     window.addEventListener('touchend', () => this.onTouchEnd());
     window.addEventListener('touchcancel', () => this.onTouchEnd());
+
+    // Virtual touch pad for mobile
+    if (this.touchPadEl) {
+      this.touchPadEl.style.display = 'block';
+      this.touchPadEl.addEventListener('pointerdown', (e) => this.onPadDown(e));
+      window.addEventListener('pointermove', (e) => this.onPadMove(e));
+      window.addEventListener('pointerup', () => this.onPadUp());
+      window.addEventListener('pointercancel', () => this.onPadUp());
+    }
 
     // Mouse fallback for desktop testing
     window.addEventListener('mousedown', (e) => this.onMouseDown(e));
@@ -945,6 +791,49 @@ class TouchControls {
     this.steerInput = Math.max(-1, Math.min(1, normalized * 1.5));
   }
 
+
+  onPadDown(e) {
+    if (!this.touchPadEl) return;
+    this.padActive = true;
+    this.touching = false;
+    this.updatePadInput(e.clientX, e.clientY);
+  }
+
+  onPadMove(e) {
+    if (!this.padActive) return;
+    this.updatePadInput(e.clientX, e.clientY);
+  }
+
+  onPadUp() {
+    if (!this.padActive) return;
+    this.padActive = false;
+    this.steerInput = 0;
+    if (this.touchKnobEl) {
+      this.touchKnobEl.style.left = '50%';
+      this.touchKnobEl.style.top = '50%';
+    }
+  }
+
+  updatePadInput(clientX, clientY) {
+    const rect = this.touchPadEl.getBoundingClientRect();
+    const cx = rect.left + rect.width / 2;
+    const cy = rect.top + rect.height / 2;
+    const dx = clientX - cx;
+    const dy = clientY - cy;
+    const maxRadius = rect.width * 0.34;
+    const dist = Math.hypot(dx, dy) || 1;
+    const clamped = Math.min(dist, maxRadius);
+    const nx = (dx / dist) * clamped;
+    const ny = (dy / dist) * clamped;
+
+    this.steerInput = Math.max(-1, Math.min(1, nx / maxRadius));
+
+    if (this.touchKnobEl) {
+      this.touchKnobEl.style.left = `${50 + (nx / (rect.width / 2)) * 50}%`;
+      this.touchKnobEl.style.top = `${50 + (ny / (rect.height / 2)) * 50}%`;
+    }
+  }
+
   getSteerInput() {
     // Keyboard override
     if (this.keys['ArrowLeft'] || this.keys['a']) return -1;
@@ -966,7 +855,8 @@ class Game {
     this.comboCount = 0;
     this.comboTimer = 0;
     this.cameraShake = { x: 0, y: 0 };
-    this.highScore = parseInt(localStorage.getItem('neonrush_highscore') || '0');
+    this.freeDriveDistance = 0;
+    this.heading = -Math.PI / 2;
 
     // DOM elements
     this.startScreen = document.getElementById('startScreen');
@@ -982,13 +872,7 @@ class Game {
     this.steerLeftEl = document.getElementById('steerLeft');
     this.steerRightEl = document.getElementById('steerRight');
     this.loadingEl = document.getElementById('loading');
-    this.startHighScoreEl = document.getElementById('startHighScore');
 
-    // Show high score on start screen
-    if (this.highScore > 0) {
-      this.startHighScoreEl.style.display = 'block';
-      this.startHighScoreEl.querySelector('span').textContent = this.highScore;
-    }
 
     // Three.js setup
     this.canvas = document.getElementById('gameCanvas');
@@ -1004,8 +888,8 @@ class Game {
 
     // Scene
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0x050510);
-    this.scene.fog = new THREE.FogExp2(0x050510, 0.006);
+    this.scene.background = new THREE.Color(0x87ceeb);
+    this.scene.fog = new THREE.FogExp2(0xbfe1ff, 0.0012);
 
     // Camera
     this.baseFOV = 65;
@@ -1019,15 +903,15 @@ class Game {
     this.camera.lookAt(0, 1, -20);
 
     // Lighting
-    const ambient = new THREE.AmbientLight(0x111133, 0.5);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.65);
     this.scene.add(ambient);
 
-    const dirLight = new THREE.DirectionalLight(0x6666aa, 0.3);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.9);
     dirLight.position.set(5, 20, 10);
     this.scene.add(dirLight);
 
     // Hemisphere light for subtle sky/ground distinction
-    const hemiLight = new THREE.HemisphereLight(0x0a0a2e, 0x050510, 0.4);
+    const hemiLight = new THREE.HemisphereLight(0x87ceeb, 0x7bb36a, 0.8);
     this.scene.add(hemiLight);
 
     // Post-processing
@@ -1036,9 +920,9 @@ class Game {
 
     this.bloomPass = new UnrealBloomPass(
       new THREE.Vector2(window.innerWidth, window.innerHeight),
-      1.2,   // strength
-      0.4,   // radius
-      0.85   // threshold
+      0.65,   // strength
+      0.35,   // radius
+      0.9   // threshold
     );
     this.composer.addPass(this.bloomPass);
 
@@ -1049,6 +933,8 @@ class Game {
     // Game objects
     this.vehicle = createVehicle();
     this.vehicle.position.set(0, 0, 0);
+    this.heading = -Math.PI / 2;
+    this.vehicle.rotation.y = 0;
     this.scene.add(this.vehicle);
 
     this.world = new WorldGenerator(this.scene);
@@ -1059,11 +945,8 @@ class Game {
     // Skybox-like distant elements (subtle neon horizon)
     this.createSkyElements();
 
-    // Initial chunk generation
-    for (let i = 0; i < VISIBLE_CHUNKS + 2; i++) {
-      this.world.createChunk(-i * CHUNK_LENGTH);
-    }
-    this.world.furthestZ = -(VISIBLE_CHUNKS + 2) * CHUNK_LENGTH;
+    // Initial world generation
+    this.world.update(0, 0);
 
     // Event listeners
     document.getElementById('startBtn').addEventListener('click', () => this.startGame());
@@ -1085,32 +968,29 @@ class Game {
   }
 
   createSkyElements() {
-    // Distant neon horizon lines
-    const horizonGeom = new THREE.PlaneGeometry(500, 0.5);
-    const horizonMat = new THREE.MeshBasicMaterial({
-      color: 0xff00ff,
+    const cloudMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
       transparent: true,
-      opacity: 0.15,
-      blending: THREE.AdditiveBlending,
+      opacity: 0.35,
+      depthWrite: false,
     });
 
-    for (let i = 0; i < 5; i++) {
-      const line = new THREE.Mesh(horizonGeom, horizonMat.clone());
-      line.position.set(0, 0.5 + i * 3, -350);
-      line.material.opacity = 0.08 - i * 0.01;
-      this.scene.add(line);
+    this.clouds = [];
+    for (let i = 0; i < 30; i++) {
+      const cloud = new THREE.Mesh(
+        new THREE.PlaneGeometry(26 + Math.random() * 36, 8 + Math.random() * 10),
+        cloudMat.clone()
+      );
+      cloud.position.set((Math.random() - 0.5) * 240, 25 + Math.random() * 22, -60 - Math.random() * 900);
+      cloud.userData.speed = 1 + Math.random() * 1.4;
+      this.scene.add(cloud);
+      this.clouds.push(cloud);
     }
 
-    // Distant "sun" glow
-    const sunGeom = new THREE.PlaneGeometry(80, 80);
-    const sunMat = new THREE.MeshBasicMaterial({
-      color: 0xff0066,
-      transparent: true,
-      opacity: 0.08,
-      blending: THREE.AdditiveBlending,
-    });
+    const sunGeom = new THREE.SphereGeometry(18, 24, 24);
+    const sunMat = new THREE.MeshBasicMaterial({ color: 0xffe8a8 });
     const sun = new THREE.Mesh(sunGeom, sunMat);
-    sun.position.set(0, 20, -380);
+    sun.position.set(90, 50, -280);
     this.scene.add(sun);
     this.sunMesh = sun;
   }
@@ -1133,12 +1013,16 @@ class Game {
     this.comboTimer = 0;
 
     this.vehicle.position.set(0, 0, 0);
+    this.heading = -Math.PI / 2;
+    this.vehicle.rotation.y = 0;
 
     this.startScreen.style.display = 'none';
     this.hudEl.style.display = 'block';
     this.gameOverEl.style.display = 'none';
 
     this.audio.startEngine();
+    this.comboDisplay.style.opacity = '1';
+    this.comboDisplay.textContent = 'FREE DRIVE MODE';
     this.clock.start();
   }
 
@@ -1148,10 +1032,7 @@ class Game {
 
     // Reset world
     this.world.reset();
-    for (let i = 0; i < VISIBLE_CHUNKS + 2; i++) {
-      this.world.createChunk(-i * CHUNK_LENGTH);
-    }
-    this.world.furthestZ = -(VISIBLE_CHUNKS + 2) * CHUNK_LENGTH;
+    this.world.update(0, 0);
 
     this.state = 'playing';
     this.score = 0;
@@ -1161,80 +1042,24 @@ class Game {
     this.comboCount = 0;
     this.comboTimer = 0;
     this.vehicle.position.set(0, 0, 0);
+    this.heading = -Math.PI / 2;
+    this.vehicle.rotation.y = 0;
 
     this.gameOverEl.style.display = 'none';
     this.hudEl.style.display = 'block';
 
     this.audio.startEngine();
+    this.comboDisplay.style.opacity = '1';
+    this.comboDisplay.textContent = 'FREE DRIVE MODE';
     this.clock.start();
   }
 
   gameOver() {
-    this.state = 'gameover';
-    this.audio.playCrash();
-    this.audio.stopEngine();
-
-    // Screen shake
-    this.cameraShake = { x: 2, y: 1 };
-
-    // Update high score
-    const isNewRecord = this.score > this.highScore;
-    if (isNewRecord) {
-      this.highScore = this.score;
-      localStorage.setItem('neonrush_highscore', String(this.highScore));
-    }
-
-    // Show game over screen after delay
-    setTimeout(() => {
-      this.hudEl.style.display = 'none';
-      this.gameOverEl.style.display = 'flex';
-      this.finalScoreEl.textContent = this.score;
-      this.bestScoreEl.textContent = `BEST: ${this.highScore}`;
-      this.newRecordEl.style.display = isNewRecord ? 'block' : 'none';
-    }, 600);
+    return;
   }
 
   checkCollisions() {
-    const px = this.vehicle.position.x;
-    const pz = this.vehicle.position.z;
-
-    for (const obs of this.world.obstacles) {
-      if (!obs.userData.active) continue;
-      const dx = Math.abs(px - obs.position.x);
-      const dz = Math.abs(pz - obs.position.z);
-
-      // Collision check
-      if (dx < COLLISION_DISTANCE && dz < 3.0) {
-        this.gameOver();
-        return;
-      }
-
-      // Near miss check
-      if (dx < NEAR_MISS_DISTANCE && dx > COLLISION_DISTANCE && dz < 2.5) {
-        obs.userData.active = false;
-        this.comboCount++;
-        this.comboTimer = 2.0;
-        this.score += 50 * this.comboCount;
-        this.audio.playNearMiss();
-
-        this.comboDisplay.textContent = `NEAR MISS x${this.comboCount}  +${50 * this.comboCount}`;
-        this.comboDisplay.style.opacity = '1';
-      }
-    }
-
-    // Boost pad check
-    for (const pad of this.world.boostPads) {
-      if (!pad.userData.active) continue;
-      const dx = Math.abs(px - pad.position.x);
-      const dz = Math.abs(pz - pad.position.z);
-
-      if (dx < 1.8 && dz < 2.0) {
-        pad.userData.active = false;
-        this.boostTimer = 3.0;
-        this.audio.playBoost();
-        this.scene.remove(pad);
-      }
-    }
+    // Free-drive mode: no collisions or score events.
   }
 
   update(delta) {
@@ -1243,7 +1068,7 @@ class Game {
     delta = Math.min(delta, 0.05); // Cap delta to prevent large jumps
 
     // Speed management
-    this.speed = Math.min(this.speed + SPEED_INCREASE_RATE * delta, MAX_SPEED);
+    this.speed = THREE.MathUtils.lerp(this.speed, MAX_SPEED * 0.92, SPEED_INCREASE_RATE * delta);
     let currentSpeed = this.speed;
 
     // Boost
@@ -1252,51 +1077,59 @@ class Game {
       currentSpeed *= 1.5;
     }
 
-    // Move vehicle forward
-    const moveDistance = currentSpeed * delta;
-    this.vehicle.position.z -= moveDistance;
-    this.distance += moveDistance;
-    this.score = Math.floor(this.distance);
-
-    // Steering
+    // Steering + heading for free directional driving
     const steerInput = this.controls.getSteerInput();
-    const steerAmount = steerInput * STEER_SPEED * delta;
-    this.vehicle.position.x += steerAmount;
-    this.vehicle.position.x = Math.max(-STEER_LIMIT, Math.min(STEER_LIMIT, this.vehicle.position.x));
+    const speedNorm = Math.min(currentSpeed / MAX_SPEED, 1);
+    this.heading += steerInput * TURN_RATE * delta * (0.5 + speedNorm * 0.8);
 
-    // Vehicle tilt on steering
-    this.vehicle.rotation.z = THREE.MathUtils.lerp(this.vehicle.rotation.z, -steerInput * 0.08, 0.1);
-    this.vehicle.rotation.y = THREE.MathUtils.lerp(this.vehicle.rotation.y, -steerInput * 0.03, 0.1);
+    // Move vehicle forward in heading direction
+    const moveDistance = currentSpeed * delta;
+    const forwardX = Math.cos(this.heading);
+    const forwardZ = Math.sin(this.heading);
+    this.vehicle.position.x += forwardX * moveDistance;
+    this.vehicle.position.z += forwardZ * moveDistance;
+
+    // Square map bounds
+    this.vehicle.position.x = Math.max(-MAP_LIMIT, Math.min(MAP_LIMIT, this.vehicle.position.x));
+    this.vehicle.position.z = Math.max(-MAP_LIMIT, Math.min(MAP_LIMIT, this.vehicle.position.z));
+
+    this.distance += moveDistance;
+    this.freeDriveDistance = this.distance / 1000;
+
+    // Vehicle orientation / lean
+    const targetYaw = this.heading + Math.PI / 2;
+    this.vehicle.rotation.y = THREE.MathUtils.lerp(this.vehicle.rotation.y, targetYaw, 0.16);
+    this.vehicle.rotation.z = THREE.MathUtils.lerp(this.vehicle.rotation.z, -steerInput * 0.1, 0.1);
+
+    if (Math.abs(steerInput) > 0.82 && speedNorm > 0.5) {
+      this.audio.playTurnSkid();
+    }
 
     // Steer indicators
     this.steerLeftEl.classList.toggle('active', steerInput < -0.2);
     this.steerRightEl.classList.toggle('active', steerInput > 0.2);
 
-    // Combo timer
-    if (this.comboTimer > 0) {
-      this.comboTimer -= delta;
-      if (this.comboTimer <= 0) {
-        this.comboCount = 0;
-        this.comboDisplay.style.opacity = '0';
-      }
-    }
-
-    // Collisions
+    // Collisions disabled in free-drive mode
     this.checkCollisions();
 
     // Camera follow
-    const speedNorm = Math.min(currentSpeed / MAX_SPEED, 1);
-    const camTargetX = this.vehicle.position.x * 0.3;
-    const camTargetZ = this.vehicle.position.z + 8 + speedNorm * 3;
-    const camTargetY = 4.5 - speedNorm * 1.0;
+    const dirX = Math.cos(this.heading);
+    const dirZ = Math.sin(this.heading);
+    const camDistance = 10 + speedNorm * 6;
+    const camTargetX = this.vehicle.position.x - dirX * camDistance;
+    const camTargetZ = this.vehicle.position.z - dirZ * camDistance;
+    const camTargetY = 5.8 - speedNorm * 1.2;
 
-    this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, camTargetX, 0.05);
-    this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, camTargetZ, 0.08);
-    this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, camTargetY, 0.05);
+    this.camera.position.x = THREE.MathUtils.lerp(this.camera.position.x, camTargetX, 0.09);
+    this.camera.position.z = THREE.MathUtils.lerp(this.camera.position.z, camTargetZ, 0.09);
+    this.camera.position.y = THREE.MathUtils.lerp(this.camera.position.y, camTargetY, 0.08);
 
     // Camera look ahead
-    const lookAheadZ = this.vehicle.position.z - 20 - speedNorm * 15;
-    this.camera.lookAt(this.vehicle.position.x * 0.15, 1, lookAheadZ);
+    this.camera.lookAt(
+      this.vehicle.position.x + dirX * (26 + speedNorm * 28),
+      1.4,
+      this.vehicle.position.z + dirZ * (26 + speedNorm * 28)
+    );
 
     // Camera shake at high speed
     const shakeIntensity = speedNorm * speedNorm * 0.15;
@@ -1320,27 +1153,39 @@ class Game {
     this.radialBlurPass.uniforms.intensity.value = speedNorm * speedNorm * 1.2;
 
     // Bloom intensity
-    this.bloomPass.strength = 1.0 + speedNorm * 0.8;
+    this.bloomPass.strength = 0.6 + speedNorm * 0.25;
 
     // Speed lines overlay
     this.speedLinesEl.style.opacity = String(speedNorm * speedNorm * 0.8);
 
     // Update world
-    this.world.update(this.vehicle.position.z, this.score);
+    this.world.update(this.vehicle.position.x, this.vehicle.position.z);
 
     // Update particles
     this.particles.update(currentSpeed, this.vehicle.position.z);
 
     // Move sun with player
     if (this.sunMesh) {
-      this.sunMesh.position.z = this.vehicle.position.z - 380;
+      this.sunMesh.position.z = this.vehicle.position.z - 220;
+      this.sunMesh.position.x = this.vehicle.position.x + 120;
+    }
+
+    if (this.clouds) {
+      for (const cloud of this.clouds) {
+        cloud.position.z += cloud.userData.speed * delta * 16;
+        if (cloud.position.z > this.vehicle.position.z + 140 || Math.abs(cloud.position.x - this.vehicle.position.x) > 260) {
+          cloud.position.z = this.vehicle.position.z - 700 - Math.random() * 260;
+          cloud.position.x = this.vehicle.position.x + (Math.random() - 0.5) * 260;
+          cloud.position.y = 25 + Math.random() * 22;
+        }
+      }
     }
 
     // Update audio
-    this.audio.updateEngine(speedNorm);
+    this.audio.updateEngine(speedNorm, delta);
 
     // Update HUD
-    this.scoreDisplay.textContent = this.score;
+    this.scoreDisplay.textContent = `CRUISE ${this.freeDriveDistance.toFixed(1)} KM`;
     const displaySpeed = Math.floor(currentSpeed * 3.6); // Convert to km/h feel
     this.speedDisplay.innerHTML = `${displaySpeed}<span> KM/H</span>`;
   }
@@ -1360,7 +1205,7 @@ class Game {
       this.camera.lookAt(0, 1, this.camera.position.z - 30);
 
       // Keep generating world for menu background
-      this.world.update(this.camera.position.z - 10, 0);
+      this.world.update(this.camera.position.x, this.camera.position.z);
       this.particles.update(30, this.camera.position.z);
 
       if (this.sunMesh) {
