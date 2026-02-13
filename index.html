@@ -165,7 +165,7 @@
       pointer-events: none;
       z-index: 45;
       opacity: 0;
-      background: radial-gradient(ellipse at center, transparent 30%, rgba(255,255,255,0.08) 100%);
+      background: radial-gradient(ellipse at center, transparent 35%, rgba(255,255,255,0.14) 100%);
     }
 
     /* ===== GAME OVER ===== */
@@ -178,43 +178,25 @@
       align-items: center;
       justify-content: center;
       z-index: 100;
-      background: rgba(0,0,0,0.6);
+      background: rgba(10,22,35,0.55);
     }
     #gameOver .title {
       font-size: clamp(36px, 9vw, 64px);
       font-weight: 900;
-      color: #ff0044;
-      text-shadow: 0 0 20px #ff0044, 0 0 40px rgba(255,0,68,0.5);
+      color: #f4fbff;
+      text-shadow: 0 4px 18px rgba(0,0,0,0.35);
       letter-spacing: 4px;
     }
     #gameOver .final-score {
       margin-top: 20px;
       font-size: clamp(20px, 5vw, 36px);
-      color: #fff;
+      color: #f8fdff;
       letter-spacing: 2px;
     }
     #gameOver .final-score em {
-      color: #00ffff;
+      color: #ffe08a;
       font-style: normal;
-      text-shadow: 0 0 10px #00ffff;
-    }
-    #gameOver .best-score {
-      margin-top: 10px;
-      font-size: clamp(14px, 3.5vw, 20px);
-      color: #ffff00;
-      text-shadow: 0 0 8px rgba(255,255,0,0.3);
-    }
-    #gameOver .new-record {
-      font-size: clamp(16px, 4vw, 24px);
-      color: #ff00ff;
-      text-shadow: 0 0 10px #ff00ff;
-      animation: recordPulse 0.5s ease-in-out infinite alternate;
-      margin-top: 8px;
-      display: none;
-    }
-    @keyframes recordPulse {
-      from { opacity: 0.7; }
-      to { opacity: 1; }
+      text-shadow: 0 2px 10px rgba(0,0,0,0.35);
     }
     #restartBtn {
       margin-top: 40px;
@@ -222,13 +204,13 @@
       font-size: clamp(16px, 4vw, 22px);
       font-weight: 700;
       letter-spacing: 4px;
-      color: #050510;
-      background: #ff00ff;
+      color: #113357;
+      background: #ffd166;
       border: none;
       border-radius: 4px;
       cursor: pointer;
       text-transform: uppercase;
-      box-shadow: 0 0 20px rgba(255,0,255,0.5);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.25);
       transition: transform 0.1s;
     }
     #restartBtn:active { transform: scale(0.95); }
