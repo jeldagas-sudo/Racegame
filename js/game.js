@@ -1079,6 +1079,9 @@ class Game {
 
     // Start render loop
     this.animate();
+
+    // Auto-start immediately after initialization
+    this.startGame({ playClickSound: false });
   }
 
   createSkyElements() {
@@ -1112,9 +1115,15 @@ class Game {
     this.sunMesh = sun;
   }
 
-  startGame() {
+  startGame(options = {}) {
+    const { playClickSound = true } = options;
+
+    if (this.state === 'playing') return;
+
     this.audio.init();
-    this.audio.playUIClick();
+    if (playClickSound) {
+      this.audio.playUIClick();
+    }
     this.state = 'playing';
     this.score = 0;
     this.distance = 0;
